@@ -1,0 +1,227 @@
+	在lua中表示数组的值，lua为这种情况提供了基本类型userdat，一个userdata提供了一个在lua中没有预定义操作的raw内存
+void* lua_newuserdata(lua_State*L , size_t size);
+
+  	从lua中调用c函数，也必须遵循一些协议来传递参数和获得返回结果，另外从lua调用c函数我们必须注册函数，也就是说，必须把c函数的地址以一个适当的方式传递给lua解释器。当lua调用c函数的时候，使用和c调用lua相同类型的栈来交互，c函数从栈中获取它的参数，调用结束后将返回结果放到栈中。为了区分返回结果和栈中其他的值，每个c函数还会返回结果的个数。用来交互的栈不是全局变量，每个函数都有它自己的私有栈。当lua调用c函数的时候，第一个参数在栈的index = 1的位置 。c函数调用lua代码时也是一样。
+	lua要调用的c函数有一个一致的签名 typedef int(*lua_CFunction)(lua_State *L)
+	lua_pushcfunction(l,l_sin);//获取c函数的指针，并在lua中创建一个function类型的值来表示这个这个函数
+	lua_setglobal(l,"mysin");//将table出栈并将其赋给一个全局变量名
+	上面第一行将类型为function的值入栈，第二行将function赋值给全局变量mysin，直接放到lua.c文件中，编译后lua就可以用这个mysin函数了
+	
+	lua.h 定义了lua提供的基础函数 包括创建新的lua环境的函数lua_open, 调用lua函数lua_pcall,和读取写入lua环境的全局变量的函数，注册可以被lua代码调用的新函数的函数，所有在lua.h中被定义的都有一个lua_前缀
+	lauxlib.h 定义了辅助库auxlib提供的函数，同样，所有在其定义的都已luaL_开头 比如luaL_loadbuffer ,在lua.h的基础函数上提供了更高层次的抽象，auxlib没有存取lua内部的权限，完成工作都是通过正式的基本API
+	lualib.h 为了保持 Lua 的苗条，所有的标准库以单独的包提供，所以如果你不需要就不会强求你使用它们。头文件 lualib.h 定义了打开这些库的函数。例如，调用 luaopen_io
+	Lua 库没有定义任何全局变量。它所有的状态保存在动态结构 lua_State 中，而且指向这个结构的指针作为所有 Lua 函数的一个参数
+	步骤：luaL_loadbuffer编译这些lua代码，如果没有错误则压入栈，然后调用lua_pcall，会在保护模式下把chunk从栈中弹出并运行，lua_pcall在没有错误的时候返回0，在有错误的时候都会将一条错误信息压入栈，用lua_tostring得到这条信息，用lua_pop将从栈中删除，
+	Lua 核心决不会直接输出任何东西到任务输出流上；它通过返回错误代码和错误信息来发出错误信号。
+
+	当在lua和c之前交换数据时 会存在动态和静态类型的不匹配和自动与手动内存管理的不一致一种不好的方法是在c中声明一些union类型来解决，称之为lua_vlalue,它可以描述所有类型的lua值缺点是1需要复杂的映射到其他语言会很困难，2 lua负责垃圾回收，如果我们将lua值保存在c变量中，lua引擎没有办法了解这种用法，可能会错误的认为某个值为垃圾并收集它
+	替代的方案：用一个抽象的栈在lua与c之间在lua与c之间交换值，栈中每条记录都可以保存任何lua值，c请求调用lua，被请求的值会被压入栈，传递一个值给lua，先将这个值压入栈中，需要一个不同函数将每种c类型压入栈中，需要一个不同函数从不同函数从栈中取值，由于栈式lua来管理的，垃圾回收器知到哪个值正在被c使用  luaL_loadbuffer把它的结果留在了栈上(一条错误信息或chunk)  lua_pcall从栈上获取要被调用的函数并把任何临时的错误信息放在这里
+	api可以将每种用c来描述的lua类型压栈，nil用lua_pushnil数值型用lua_pushnumber布尔型 lua_pushboollean任意字符类型char* 允许包含'\0'用lua_pushlstringc语言风格的字符串'\0'结束的 const char* 用lua_pushstring
+void lua_pushnil (lua_State *L); 
+void lua_pushboolean (lua_State *L, int bool); 
+void lua_pushnumber (lua_State *L, double n); 
+void lua_pushlstring (lua_State *L, const char *s,  size_t length); 
+void lua_pushstring (lua_State *L, const char *s); 
+	Lua 中的字符串不是以零为结束符的；它们依赖于一个明确的长度，因此可以包含任意的二进制数据。将字符串压入串的正式函数是 lua_pushlstring，它要求一个明确的长度作为参数。对于以零结束的字符串，你可以用 lua_pushstring（它用 strlen 来计算字符串长度）。Lua 从来不保持一个指向外部字符串（或任何其它对象，除了 C 函数——它总是静态指针）的指针。对于它保持的所有字符串，Lua 要么做一份内部的拷贝要么重新利用已经存在的字符串。因此，一旦这些函数返回之后你可以自由的修改或是释放你的缓冲区
+
+	lua调用c的时候，栈上至少有20个空闲的记录(lua.h中的lua_minstack宏定义了这个常量) 对于多数普通的用法栈是足够的，所以我们不必去考虑它 可以使用 int lua_check(lua_state *L, int sz)可以检测是否有足够的空间
+	可以用栈顶来作为参照来存取元素，-1指向栈顶元素，-2表示前一个元素，依次类推，例如调用lua_tostring(L,-1)是以字符串的形式返回栈顶的元素。lua_isnumber, ua_isstring, lua_istable来检查是否是一个指定的类型，它的原型是int lua_is...(lua_State *L,int index);
+	lua_isnumber 和 lua_isstring 函数不检查这个值是否是指定的类型，而是看它是否能被转换成指定的那种类型。例如，任何数字类型都满足 lua_isstring
+	lua_type函数，返回栈中元素的类型(lua_is*中有些函数实际上是用这个函数定义的宏) 在lua.h中每个类型都被定义成为一个常量，LUA_TNIL、LUA_TBOOLEAN 、 LUA_TNUMBER 、 LUA_TSTRING 、 LUA_TTABLE 、LUA_TFUNCTION、LUA_TUSERDATA 以及 LUA_TTHREAD。这个函数主要被用于在switch语句中使用
+	为了从栈中获取值，这里有lua_to..函数
+int lua_toboolean (lua_State *L, int index); 
+double lua_tonumber (lua_State *L, int index); 
+const char * lua_tostring (lua_State *L, int index); 
+size_t lua_strlen (lua_State *L, int index);
+	lua_tostring函数返回一个指向字符串内部拷贝的指针，不能修改它，只要这个指针对应的值还在栈内，lua会保证这个指针一直有效，当一个c函数返回后，lua会清理它的栈，所有有个原则，永远不要将指向lua字符串的指针保存到访问他们外部函数中。(不要放在函数外部，这个函数返回后就没了)
+	lua_tostring返回的字符串结尾总是会有一个字符结束标志0，但是字符串可能也会包含0，lua_strlen返回字符串的实际长度
+	int lua_gettop(lua_State *L) 函数lua_gettop返回堆栈中的元素个数，他也是栈顶元素的索引，int lua_settop(lua_State*L,int index)设置栈顶为一个指定的值 lua_settop(L,0)清空堆栈  函数 lua_pushvalue 压入堆栈上指定索引的一个抟贝到栈顶；lua_remove 移除指定索
+引位置的元素，并将其上面所有的元素下移来填补这个位置的空白；lua_insert 移动栈顶元素到指定索引的位置，并将这个索引位置上面的元素全部上移至栈顶被移动留下的空隔；
+	#define lua_pop(L,n) lua_settop(L,-(n) - 1)
+	/* true 10 true nil nil */    nil开始时栈顶 也是-1 也是 5  执行lua_pop(L,4)  相当于执行lua_settop(L,-5) 也是返回-5位置的栈
+	
+	不论什么时候C 函数发现错误只要简单的调用 lua_error（或者 luaL_error，后者更好，因为她调用了前者并格式化了错误息）。Lua_error 函数会清理所有在 Lua 中需要被清理的，然后和错误信息一起回到最初的执行 lua_pcall 的地方
+
+	还有一些其他的函数比如luaL_loadfile(L, filename) ， lua_tostring(L, -1)以字符串的形式返回栈顶的值，lua_getglobal 函数，其中一参数为变量名称。每调用一次就把相应的变量值压入栈顶 ,   lua_tonumber 函数将得到的数值转换成 double 类型并用(int)强制转换成整型  lua_close(L) 关闭数据流并返回值
+
+debug库有有两种函数 自省和hook 自省函数可以检查运行程序的某些方面 自省函数中最主要的是debug.getinfo() 第一个参数是一个函数或者是栈级别 对于函数debug.getinfo()会返回以下域：
+source 标明函数被定义的地方 如果在字符串内被定义loadstring source就是那个字符串 如果函数在文件中定义 source就是@加上文件名
+short_src source的简短版本
+linedefined source中函数被定义的行数
+what 标明函数类型 普通函数结果为"lua" c函数结果为c 如果是lua的主chunk，结果为"main"
+name 函数的合理名字
+namewhat 上一个字段代表的含义 ，这个字段取值可能为W"global"、"local"、"method"、"field"，或者 ""（空字符串）。空字符串意味着Lua 没有找到这个函数名。
+nups upvalues的个数
+func 函数本身
+
+debug.getlocal函数可以访问任何活动状态的局部 这个函数由两个参数：将要查询的函数的栈级别和变量的索引。函数有两个返回值：变量名和变量当前值。
+
+debug 库的 getupvalue 函数访问 Lua 函数的 upvalues。
+
+debug 库的 hook 是这样一种机制：注册一个函数，用来在程序运行中某一事件到达时被调用
+debug.sethook(print, "l")简单的将print函数作为hook函数 并指示lua当line事件发生时调用print函数
+
+io.write()与print函数不同在于write不附加任何额外的字符到输出，例如制表符 换行符 还有就是write函数使用当前输出文件 而print始终使用标准输出 print函数会自动调用tostring方法 所以可以显示tables function 或 nil  所以io.write只接受字符串输入
+
+在 string.find 使用 captures 的时候，函数会返回捕获的值作为额外的结果。这常被用来将一个目标串拆分成多个：
+print(string.gsub("hello Lua!", "(%a)", "%1-%1")) 
+ --> h-he-el-ll-lo-o L-Lu-ua-a! 
+print(string.gsub("hello Lua", "(.)(.)", "%2%1"))  %2表示第二个捕获的拷贝 %1表示第1个捕获的拷贝
+--> ehll ouLa 
+另一个有用的例子是去除字符串首尾的空格：
+local  s = "1s\"'fd1"
+function trim (s) 
+return (string.gsub(s, "^%s*(.-)%s*$", "%1")) --可以理解为用一个空的来替换了%1 结果就是把第一个1和最后的1给去掉了 ，最后的匹配串本来是两个拷贝 现在只有一个 说明用空来代替
+
+
+. 任意字符
+%a 字母
+%c 控制字符
+%d 数字
+%l 小写字母
+%p 标点字符
+%s 空白符
+%u 大写字母
+%w 字母和数字
+%x 十六进制数字
+%z 代表 0 的字符
+%在模式匹配还可以当转义用
+
+i = 99; print(string.char(i, i+1, i+2)) --> cde    string.byte(s, i)将字符串 s 的第 i 个字符的转换成整数；第二个参数是可选的，print(string.byte("abc", -1)) --> 99   上面最后一行，我们使用负数索引访问字符串的最后一个字符
+
+weak表++用来告诉lua一个引用应该被回收的机制，一个weak引用是指一个不被lua认为垃圾的对象的引用，如果一个对象所有的引用都指向weak，对象将被收集，存在3种类型的weak table：weak keys组成的tables，weak values组成的tables ，纯weak tables 当一个keys或values被收集时 整个入口会从table中消失  __mode 通过这个元方法域来控制weak表  注意：只有对象会被收集，比如数字 布尔值不会被收集，一个字符串不会从 weak tables 中被移除（除非它所关联的 vaule 被收集）
+一般情况下keys和values不会被收集 属于是强引用 但是可以设置 __mode ="k" 或者__mode = "v"来被收集
+
+lua_State * L是lua的runtime实例，所有lua C API接口操作均需要传入这个变量，void size_to_luaval函数把c语言结构化Size转化为Lua对象，在函数中以lua_开头的接口函数都是Lua C API
+c语言使用相同的API与lua进行通信，他们称为lua 的 c Api ,我们把通过c api实现lua与c的相互调用的方式叫做lua binding
+
+a = Account Account = nil
+a.withdraw(100) -->  Account.balance = Account.balance - v  Account被nil了所以报错
+
+function Account.withdraw (self, v)    self.balance = self.balance - v   end  ----->  加一个self可以将表作为通用 传进来self是哪个表就用哪个表调用 把Account变成nil也没有关系 因为现在的self是a1 需要把a1变nil才行
+
+ 
+
+lua正则表达式string.find() .任意字符 %a字母 %c控制字符 %d数字 %l小写字母 %p标点字符 %u大写字母 %w字母和数字 %x16进制数字 %z代表0的字符 上面字符的大写形式表示小写的补集  单个%表示转移字符   %只有在模式串中财表示转义字符 lua的转义字符是/
+
+格式化输出 %s 返回字符串 %d返回数字 %f 返回保留6位小数 %x 接受数字转为小写的16进制 %X 转为大写的16进制 %c 转为Ascll码值 %o 转为8进制 %f 转为科学计数法 %q 接受字符串转为可安全被lua编译器读入的格式
+
+泛型for本身保存迭代状态 文法如下 for <var-list> in <exp-list> do <body> end
+var-list是一个或多个以逗号分隔的变量名列表，<exp-list>是一个或多个以逗号分隔的表达式列表 也是迭代工厂的调用，我们称变量列表中第一个变量为控制变量，其值为nil时结束 表达式应该返回泛型for需要的三个值 控制变量(其实就是下标) 状态常量(其实就是表t) 迭代函数
+第一步 计算in后面的值 返回迭代函数 状态常量 控制变量 
+第二步 将状态常量和控制变量作为参数调用迭代函数
+第三步 将迭代函数返回的值赋给变量列表(重要----------一般打印也只打印这个变量列表)
+
+pairs(t) 如果t有元方法__pairs 则以t为参数调用他
+function ipairs(a) return iter,a,0 ipirs函数返回迭代函数 表a 和0
+function pairs(a) return next a,nil pairs函数返回next函数 表a 和nil pairs函数可以用next原始实现
+
+ipairs实现
+function iter(a,i)
+i = i +1
+local v = a[i]
+if v = then
+return i,v
+end
+end
+function ipairs(a)
+return iter,a,0
+
+__index 索引表 __newindex 更新表 
+
+print函数总会调用tostring来格式化他的输出 然而在格式化一个对象时tostring会首先检查对象是否存在一个带有__tostring域的元方法 如果存在则以对象作为参数调用对应的函数来完成格式化
+
+os.time() os.date()  os.date("%x", os.time()) os.date("*t",os.time())  函数data，不管它的名字是什么，其实是time函数的一种“反函数”。它将一个表示日期和时间的数值，转换成更高级的表现形式。其第一个参数是一个格式化字符串，描述了要返回的时间形式。第二个参数就是时间的数字表示，默认为当前的时间。使用格式字符 "*t"，创建一个时间表
+
+os.execute() 相当于c语言的system 系统级的语句 有个缺省的参数command，这个函数就是解析command通过的系统来调用解析的结果，他会返回一个依赖于操作系统的状态码，当参数缺省时，如果操作系统可以调用解析参数则返回非0的数，否则返回0
+
+local f1 = io.open("t1.txt") io.write() 在时写入字符串时需要注意注入式攻击 比如io.write("" ]]..os.execute('rm *')..[[ "") 如果执行dofile语句，就会执行写入的os.execute, 可以这样 io.write("%q",o) %q可以正确的处理包含引号和换行等特殊字符的字符串
+
+table.remove() 移除表中元素，并且返回这个元素 第二个参数不填则移除最后一个参数
+function addString (stack, s) 
+  table.insert(stack, s) -- push 's' into the the stack 
+  for i=table.getn(stack)-1, 1, -1 do
+     if string.len(stack[i]) > string.len(stack[i+1]) then
+        break 
+     end 
+     stack[i] = stack[i] .. table.remove(stack) 
+end 
+end 
+
+error(any，inter) 终止上次保护函数调用，并且返回错误对象，error永远不会返回 与pcall连用 foo =function() if... then error() end 然后pcall保护模式调用foo  pcall(foo)返回错误信息 和一个状态码 如果没有发生错误 状态码返回true 否则返回false
+xpcall接受两个参数，调用函数和错误处理函数，当pcall返回错误信息时已经释放了保存错误发生情况的栈的信息，如果想得到traceback必须在pcall返回前获取，xpcall提供这个功能，
+
+function   a()  end function是一种类型 这种写法是把函数当成了表达式
+
+loadlib.动态连接功能，这个函数有两个参数，库的的绝对路径和初始化函数 local f = loadlib(path,func)
+
+1.dofile lua文件的绝对路径 加载并执行，dofile实际上是一个辅助的函数，真正完成功能的是loadfile,loadfile的存在说明了可以将lua作为一种解释型语言被调用
+2.loadfile 加载编译代码成中间码并且返回编译后的chunk作为一个函数， 不执行代码 ，不会抛出错误信息而是返回错误信息
+比较 ：在发生错误时loadfile返回nil和错误信息  运行一个文件多次时，loadfile加载一次，dofile每次都要编译
+3.loadstring与loadfile相似，从一个串中读入 f = loadstring("i = i+1")  loadfile和loadstring都不会抛出错误，如果发生异常将返回nil加上错误信息 调用loadstring返回的结果，如果存在语法错误，返回nil和错误信息 assert详细信息
+4.lua提供高级的require函数来加载运行库，1.require和dofile功能一样 require会搜索目录加载文件 2.require会判断是否重复加载 require的路径是一个模式列表 ?;?.lua;c:\windows\?;/usr/local/lua/?/?.lua
+会尝试打开这些文件
+lili 
+lili.lua 
+c:\windows\lili 
+/usr/local/lua/lili/lili.lua
+
+1.io.lines(filename,...) :一个迭代函数，将文件内的一行 "n"读取一个数字 ，返回整数或浮点型 "a"从当前位置读取文件 "l"读取一行并忽略结束标记 "L"读取一行不忽略结束标记
+2.io.input 设置默认输入文件 读入写出 配合io.read()
+3.io.output 设置默认输出文件 配合io.write()使用
+4.io.type 检查obj是否为合法的文件句柄
+5.io.flush 将写入的数据保存在默认的文件中
+如果有选中的文件 则使用file:read()等方法进行调用
+
+API Application Programming Interface 应用程序接口
+
+IDE Integrated Development Enviroment 集成开发环境 是用于提供程序开发环境的应用程序， 一般会包括代码编辑器，编译器，调试器，图形用户界面，该程序将这些功能集成了一体化的开发软件服务
+
+.md后缀文件 Machine Description 包括一个目标机器支持的每个指令的指令模式的开发文件 通常用于Unix系统中的编译程序
+
+GUI Graphical User Interface 图形用户界面 与之相对的字符界面 比如cmd控制台终端 输入字符命令进行驱动
+
+md5:一种广泛运用的密码散列函数 可以产生出一个128位的散列值 可以对一段信息产生一段信息摘要，防止被篡改，md5可以为文件产生一个独一无二的散列值，如果任何人对文件进行改动，md5值会产生改变，一般用于文件校验
+
+__MACOSX:在mac系统中会将缓存的内容一起压缩，在windows上是垃圾文件，可以直接删除
+
+cocos2dx 3.x文件夹介绍
+1.build 官方编译的项目解决方案 如.sln，Debug.win32 ,.cmd 这些在2.x是直接放在根目录的
+2.cocos 集中了cocos2dx开发中使用的所有源文件,除了cocos2dx引擎的核心部分，还包含声音引擎，物理引擎，网络，GUI等 
+3.extensions 扩展目录，包括一些2.5d特效，网络控制，以及一些GUI等，当需要这些扩展时#include "cocos-ext.h" 
+using namespace cocos2d::extension
+4.external 外部的第三方目录库 主要包含了Box2D，chipmunk物理引擎 以及sqlite3轻型数据库等  Box2d和chipmunk都是封装好的物理引擎
+5.tests 包含了官方的cpp,lua例子，其中cpp-empty-test就是最简单的例子 另外也包括了cocos2dx引擎所有类的使用，所以很重要
+6.templates 模板目录 提供了各种平台及IDE下创建的cocos2dx新工程的项目模板
+7.tools 工具目录 提供了各个平台下，创建cocos2dx新项目的脚本工具，其中tools/cocos2d-console/bin/cocos.py就是用来创建新项目的
+8.download-deps.py 自动下载cocos2d-x所需的第三方插件
+9.setup.py 配置cocos2dx的环境变量的脚本
+
+其中cocos文件夹
+1.base cocos2dx引擎的核心部分之一 存放一些基础类，如ref Director Vector map value等
+2.2d cocos2dx引擎的额核心部分之一 存放一些引擎的核心部分之一 sprite layer label menu等
+3.3d 新增了对部分3d的支持 有sprite3d animate3d
+4.math 存放引擎中与数学有关的类文件 坐标类vec2.h,几何类CCGeometry.h(定义了Rect,size)等
+5.renderer 引擎的渲染文件 Texture2d renderer shader等
+6.deprecated 一些2.x弃用的规则 兼容2.x
+7.platform 不同平台下的入口类CCApplication.h,
+8.audio 声音引擎相关源文件 在2.x里是放在根目录的cocosDenshion文件夹，这个目录是声音引擎
+9.physics 物理引擎相关源代码
+10.network 网络相关源代码
+11.ui Gui相关源代码
+12.editor-support 对编辑器的支持 cocosbuilder cocostudio spine
+13.scripting lua脚本相关的源代码
+14.cocos2d.h cocos2dx引擎核心头文件，包含引擎的所有类 可以查看引擎的所有源文件所在位置
+
+libAudio 声音引擎库，原名libcocosDenshion
+libBox2d 物理引擎
+libchipmunk 物理引擎库
+libcocos2d cocos2dx核心引擎库
+libExtensions 扩展库
+libCocosBuilder libCocosStudio libSpine 编辑器的支持库
+libNetWork 网络库 libGui Gui界面库 libLocalStorage 本地存储库 liblua lua脚本库
+
+
+
+
+

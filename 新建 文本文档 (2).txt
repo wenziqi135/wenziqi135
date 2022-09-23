@@ -1,0 +1,187 @@
+1.c++语法
+2.cocos2d结构
+3.c++与lua的交互
+4.svn和git的使用
+5.python语法学习
+------------------------------------------------------
+
+#if defined a 
+#undef a 
+#define a 200 
+#endif 
+
+#ifndef a    //如果a没有被定义 
+#define a 100 
+#endif 
+上述语句检验a是否被定义，如果被定义则用#undef语句解除定义，并重新定义
+
+#if defined XXX_XXX 
+#endif 
+是条件编译，是根据你是否定义了XXX_XXX这个宏，而使用不同的代码。一般.h文件里最外层的 
+#if !defined XXX_XXX 
+#define XXX_XXX 
+#endif 
+是为了防止这个.h头文件被重复include
+
+
+指令             用途
+ #           空指令，无任何效果
+ #include    包含一个源代码文件
+ #define     定义宏
+ #undef      取消已定义的宏
+ #if             如果给定条件为真，则编译下面代码
+ #ifdef        如果宏已经定义，则编译下面代码
+ #ifndef      如果宏没有定义，则编译下面代码
+ #elif          如果前面的#if给定条件不为真，当前条件为真，则编译下面代码
+ #endif      结束一个#if……#else条件编译块
+ #error      停止编译并显示错误信息
+--------------------------------------------------------------
+为了解决变量和函数等的作用范围，在c++中引入了名空间的概念，并增加了关键字namespace和using
+在一个名空间中可以定义一组变量和函数，这些变量和函数的作用范围一致，可以将这些变量和函数称为这个名空间的成员
+通过名空间，可以在同一个文件中使用相同的变量名或函数名，只要它们属于不同的名空间。另外，名空间可以使得代码操作具有相同名字但属于不同库的变量。而且，名空间也可以提高C语言与C++语言的兼容性。
+namespace car
+{
+int model;
+int length;
+int width;
+} 
+namespace plane
+{
+  int model;
+  namespace size // 名空间的嵌套
+  {
+    int length;
+    int width;
+  }
+}
+namespace car // 添加名空间的成员
+{
+  char * name;
+}
+
+namespace c=car; // 定义名空间的别名
+int Time; // 外部变量属于全局名空间
+
+int main()
+{
+car::length = 3;
+plane::size::length = 70;
+width = 2//报错错误
+
+using namespace plane;
+model = 202;//不报错
+size::length = 93;
+
+return 0
+}
+----------------------------------------------------------------------------------------------
+为了避免同样一个头文件被包含多次一种是#ifndef 一种是#pragma once
+1.pragma once 同一个文件不会被包含多次指的是物理上的一个文件，而不是指内容相同的两个文件
+2.无法对一段代码中作pragma once ,只针对文件
+3.不用担心宏名冲突，因为是物理意义上的同一个文件包含一次。
+----------------------------------------------------------------------------------------------------
+void*
+void*是一种特殊的指针类型，可用于存放任意对象的地址。
+void关键字用法
+1.没有返回值使用void声明类型
+2.如果函数无参数，可以用void，一般会省略。
+3.如果函数的参数或返回值可以是任意类型指针，那么应声明为void*
+任何类型的指针都可以直接赋值给void指针，且无需进行强制转换
+
+double obj = 3.14,*pd = &obj;
+void* pv = &obj;
+pv = pd;
+
+如果要把void类型的指针赋值给其他类型的指针，需要进行显示的转换
+
+double obj = 3.14,*pd = &obj;
+void* pv = &obj;
+
+double * pd1 = pv;//错误
+double *pd2 = (double*) pv;//pv为void*类型，需要转换
+
+void指针只有强制转换后才可以正常对其操作
+
+void指针可以直接和其他类型指针进行比较存放地址是否相同
+
+以void*的视角来看内存空间也仅仅是内存空间，无法访问里面的对象，只有对其进行适当类型转换才可进行操作
+
+void指针变量和普通指针一样可以通过null或nullptr来初始化
+void* pv = 0;//0x0
+void* pv2 = NULL;//0x0
+--------------------------------------------------------------------
+1.意图：extern "C"是c++特有的指令，c无法使用该指令，目的在于c++与c混合编程
+2.作用：extern "C"告诉c++编译器用c的规则编译指定的代码，
+3.c和c++的编译规则不一样，主要区别是在编译期间生成函数符号的规则不一致，由于c++需要函数重载，单纯的函数名不能区分具体函数，所以编译期间就需要将形参列表作为附加项增加到函数符号
+比如说 void func(int a,int b){printf("ssss");} 在c中定义，
+然后在c++中调用执行 extern void func(int,int); func(1,2);
+会发现报错，找不到func的引用 ，编译阶段没有问题，在链接阶段有问题，编译后生成的函数符号不一样，所以找不到函数实现，所以统一使用extern"C"
+4.使用情况
+c++代码调用c语言代码
+在c++头文件中使用
+模块A使用c来实现的，B模块是用c++来实现的如果 B要调用A模块
+#includeB头文件
+#ifdef _cplusplus
+extern "C"{ #include "A"}//表明如果这个文件是cpp文件，则在调用A模块时使用extern "C"来表明用c来编译
+5.语法
+1.可以是单一语句
+extern "C" 
+extern "C" double sqrt(double);
+2.可以是复合语句，相当于符合语句中的声明都加了extern "C"
+extern "C"
+{   double a(); int b();  }
+3.可以包含头文件，相当于头文件的声明都加了extern "C"
+extern "C"
+{#include <cmath> }
+4.不可以将extern "C"添加在函数内部
+5.
+
+-----------------------------------------------
+tolua++
+lua是一种嵌入式的语言，依靠虚拟机运行，lua系统是在state的机制上运行，state中包含运行环境的接口信息，每个state只能容纳一个脚本文件装载到内存中，要同时执行多个脚本必须初始化多个state，lua与其他系统共享信息通过栈来实现。
+
+tolua++是第三方的软件包，可以为lua提供面向对象的特性，更直接的说tolua++是一个将c/c++的函数和对象导出给llua脚本使用的工具，帮助完成上面的重复的工作
+因为lua的本质是c，不是c++,lua提供给c用的api都是基于面向过程的c函数来用的，要把c++变成其他类型注册进lua很麻烦，所以需要tolua++这个工具。
+
+使用tolua++
+1.将要导出的c/c++函数和对象定义写入.pkg文件
+2.运行tolua++工具，将。pkg文件编译为目标.cpp文件
+3.将目标cpp文件加入项目，在启动lua虚拟机后调用目标文件中的open()函数注册导出的内容
+
+利用工具tolua++.exe生成cpp文件
+>>tolua++-n mylib -o  mylib.cpp      mylib.pkg
+然后生成mylib.cpp文件加入你要编译的工程中编译，并且链接tolua++库
+
+// file: Main.cpp
+#include <iostream>
+#include <tulua++.h>
+extern “C” {
+#include <lua.h>
+#include <luaxlib.h>
+}
+#include “MyClass.h”
+
+int main(){
+int tolua_mylib_open(lua_State*);
+    lua_State* L = lua_open();
+    luaL_openlibs();
+  tolua_mylib_open(L); // 打开mylib，该函数在cpp中有实现。
+    luaL_dofile(L, “mytest.lua”); // 执行脚本文件
+
+    lua_close(L);
+    return 0;
+}
+
+quick中使用tolua++的基本步骤
+1.从c/c++源代码赋值头文件到.pkg文件中
+2.修改pkg文件内容，去掉tolua++无法识别的内容，以及不需要导出到lua的定义
+3.运行tolua++工具，根据pkg文件生成luabinding接口文件(cpp和.h文件)
+4.在appDelegate.cpp中加载luabinding文件
+5.在appdelegate初始化lua虚拟机后，调用luabinding接口文件中的luaopen函数，注册c/c++api
+
+-------------------------------------------------------2022-09-20 svn-test
+
+
+
+
+
